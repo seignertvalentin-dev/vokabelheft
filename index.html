@@ -7,9 +7,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#f6f6f2">
 <title>Vokabelheft</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-192.png">
 <style>
 :root{
   --paper:#f6f6f2;
@@ -40,7 +39,7 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0;height:100%}
 body{
-  font-family:'Archivo',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
   background-color:var(--paper);
   background-image:
     linear-gradient(var(--grid) 1px, transparent 1px),
@@ -258,12 +257,33 @@ nav button[aria-pressed="true"]{color:var(--ink);font-weight:600}
       <button class="btn quiet" id="delete-deck">Supprimer cette liste</button>
     </div>
   </section>
+  <!-- RÉGLAGES -->
+  <section id="view-settings" class="hidden">
+    <div class="head"><h1>Réglages</h1><span id="net-state"></span></div>
+
+    <div class="label">Clé API Anthropic</div>
+    <input class="text" id="set-key" type="password" placeholder="sk-ant-…" autocomplete="off" spellcheck="false">
+    <div class="hint">Elle sert à extraire et traduire le vocabulaire de tes documents. Stockée sur ce téléphone uniquement, envoyée à personne d’autre qu’Anthropic. Tu la crées sur console.anthropic.com.</div>
+    <div class="stack" style="margin-top:10px">
+      <button class="btn ghost" id="test-key">Enregistrer et tester</button>
+    </div>
+    <div id="key-state"></div>
+
+    <div class="label">Sauvegarde</div>
+    <div class="stack">
+      <button class="btn ghost" id="export-json">Exporter mes listes</button>
+      <button class="btn ghost" id="import-json">Importer un fichier</button>
+    </div>
+
+    <div class="label">Hors ligne</div>
+    <div class="hint" id="offline-state"></div>
+  </section>
 </main>
 
 <nav>
   <button id="nav-home" aria-pressed="true">Réviser</button>
   <button id="nav-add">Ajouter</button>
-  <button id="nav-data">Sauvegarde</button>
+  <button id="nav-data">Réglages</button>
 </nav>
 
 <input type="file" id="file-input" accept="application/json" class="hidden">
@@ -408,9 +428,11 @@ function reinsert(item){
 /* ---------- rendu ---------- */
 function show(v){
   view = v;
-  ['home','review','done','add','deck','confirm'].forEach(n => $('view-'+n).classList.toggle('hidden', n!==v));
-  $('nav-home').setAttribute('aria-pressed', v!=='add' && v!=='confirm');
-  $('nav-add').setAttribute('aria-pressed', v==='add' || v==='confirm');
+  ['home','review','done','add','deck','confirm','settings'].forEach(n => $('view-'+n).classList.toggle('hidden', n!==v));
+  const inAdd = v==='add' || v==='confirm';
+  $('nav-home').setAttribute('aria-pressed', !inAdd && v!=='settings');
+  $('nav-add').setAttribute('aria-pressed', inAdd);
+  $('nav-data').setAttribute('aria-pressed', v==='settings');
   window.scrollTo(0,0);
 }
 
@@ -806,16 +828,77 @@ $('delete-deck').onclick = async () => {
 $('back-home').onclick = renderHome;
 $('nav-home').onclick = () => renderHome();
 $('nav-add').onclick = () => show('add');
-$('nav-data').onclick = async () => {
-  const choice = prompt('Tape 1 pour exporter tes listes en JSON, 2 pour importer un fichier.');
-  if(choice === '1'){
-    const blob = new Blob([JSON.stringify({decks:DATA.decks}, null, 2)], {type:'application/json'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'vokabelheft-' + today() + '.json';
-    a.click(); URL.revokeObjectURL(a.href);
-  } else if(choice === '2'){ $('file-input').click(); }
+/* ---------- réglages ---------- */
+function renderSettings(){
+  $('set-key').value = DATA.settings.apiKey || '';
+  $('net-state').textContent = navigator.onLine ? '' : 'hors ligne';
+  $('key-state').innerHTML = '';
+  $('offline-state').textContent = ('serviceWorker' in navigator && navigator.serviceWorker.controller)
+    ? 'L’app est en cache sur ce téléphone : révision, listes et import de texte marchent sans réseau. Seule l’extraction IA demande une connexion.'
+    : 'Installation du cache en cours. Recharge la page une fois pour la terminer.';
+  show('settings');
+}
+$('nav-data').onclick = renderSettings;
+$('test-key').onclick = async () => {
+  DATA.settings.apiKey = $('set-key').value.trim();
+  await save();
+  if(!navigator.onLine){ $('key-state').innerHTML = '<div class="preview warn">Clé enregistrée. Test impossible hors ligne.</div>'; return; }
+  $('key-state').innerHTML = '<div class="working"><span class="dot"></span>Test en cours…</div>';
+  try{
+    await askModel('Guten Tag = bonjour');
+    $('key-state').innerHTML = '<div class="preview">Connexion au modèle établie.</div>';
+  }catch(err){
+    $('key-state').innerHTML = '<div class="preview warn">' +
+      (err.message === 'auth' ? 'Clé refusée. Vérifie qu’elle est complète et active.' : esc(err.message)) + '</div>';
+  }
 };
+$('export-json').onclick = () => {
+  const blob = new Blob([JSON.stringify({decks:DATA.decks}, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'vokabelheft-' + today() + '.json';
+  a.click(); URL.revokeObjectURL(a.href);
+};
+$('import-json').onclick = () => $('file-input').click();
+window.addEventListener('online', () => { if(view === 'settings') $('net-state').textContent = ''; });
+window.addEventListener('offline', () => { if(view === 'settings') $('net-state').textContent = 'hors ligne'; });
+
+/* ---------- installation hors ligne ---------- */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+}
+
+/* ---------- documents reçus via le menu Partager ---------- */
+async function consumeShare(){
+  if(new URLSearchParams(location.search).get('share') !== '1') return false;
+  history.replaceState({}, '', location.pathname);
+  try{
+    const cache = await caches.open('vokabelheft-share');
+    const fileRes = await cache.match('shared-file');
+    const metaRes = await cache.match('shared-meta');
+    const meta = metaRes ? await metaRes.json() : {};
+    let text = meta.text || '';
+    if(fileRes){
+      const blob = await fileRes.blob();
+      text = (meta.name || '').toLowerCase().endsWith('.docx') ? await readDocx(blob) : await blob.text();
+    }
+    await cache.delete('shared-file'); await cache.delete('shared-meta');
+    if(!text.trim()) return false;
+    $('paste').value = text;
+    if(meta.name) $('deck-name').value = meta.name.replace(/\.[^.]+$/, '');
+    $('paste').dispatchEvent(new Event('input'));
+    show('add');
+    if(!parseNotes(text).cards.length && DATA.settings.apiKey && navigator.onLine) runAI();
+    return true;
+  }catch(err){
+    $('preview').className = 'preview warn';
+    $('preview').textContent = err.message || 'Document illisible.';
+    show('add');
+    return true;
+  }
+}
+
+load().then(async () => { if(!await consumeShare()) renderHome(); });
 $('file-input').addEventListener('change', async e => {
   const f = e.target.files[0]; if(!f) return;
   try{
@@ -830,8 +913,6 @@ $('file-input').addEventListener('change', async e => {
   }catch(err){ alert('Fichier illisible. Choisis un export JSON de Vokabelheft.'); }
   e.target.value = '';
 });
-
-load().then(renderHome);
 </script>
 </body>
 </html>
