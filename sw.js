@@ -1,4 +1,4 @@
-const VERSION = 'v1';
+const VERSION = 'v3';
 const SHELL = 'vokabelheft-' + VERSION;
 const SHARE = 'vokabelheft-share';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
@@ -31,6 +31,21 @@ self.addEventListener('fetch', e => {
     return;
   }
   if (req.method !== 'GET') return;
+
+  // La page elle-même : réseau d'abord, cache en secours.
+  // Une mise à jour déposée sur GitHub arrive donc dès le lancement suivant.
+  if (req.mode === 'navigate' || req.destination === 'document') {
+    e.respondWith(
+      fetch(req).then(res => {
+        if (res && res.ok) {
+          const copy = res.clone();
+          caches.open(SHELL).then(c => c.put('./index.html', copy));
+        }
+        return res;
+      }).catch(() => caches.match('./index.html', { ignoreSearch: true }))
+    );
+    return;
+  }
 
   e.respondWith(
     caches.match(req, { ignoreSearch: true }).then(hit => {
